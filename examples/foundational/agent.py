@@ -30,6 +30,8 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from pipecat_simplismart import SimplismartHttpTTSService, SimplismartLLMService, SimplismartSTTService
 
@@ -72,7 +74,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext()
     aggregators = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(user_turn_stop_timeout=1.0),
+        user_params=LLMUserAggregatorParams(
+            # SpeechTimeoutUserTurnStopStrategy fires the LLM as soon as the
+            # STT transcript arrives (finalized=True) and the speech silence
+            # window has passed — no fixed delay, no local ML model required.
+            user_turn_strategies=UserTurnStrategies(
+                stop=[SpeechTimeoutUserTurnStopStrategy()],
+            ),
+            # Safety net: if STT never returns a transcript (e.g. empty segment)
+            # fall back to this timeout so the pipeline doesn't hang.
+            user_turn_stop_timeout=3.0,
+        ),
     )
 
     pipeline = Pipeline(

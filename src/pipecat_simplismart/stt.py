@@ -202,12 +202,16 @@ class SimplismartSTTService(SegmentedSTTService):
         await self._handle_transcription(text, True, lang_enum)
         logger.debug(f"Simplismart transcription: [{text}]")
 
+        # HTTP STT returns a single, complete result — mark it finalized so
+        # SpeechTimeoutUserTurnStopStrategy can trigger the LLM immediately
+        # instead of waiting out the full stt_timeout safety-net window.
         yield TranscriptionFrame(
             text,
             self._user_id,
             time_now_iso8601(),
             lang_enum,
             result=data,
+            finalized=True,
         )
 
     async def cleanup(self):
