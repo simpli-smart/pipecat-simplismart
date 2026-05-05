@@ -15,6 +15,9 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
+# WAV container overhead — skip segments that contain no actual audio samples.
+_WAV_HEADER_BYTES = 44
+
 
 def _wire_language(language: Language | str | None) -> str:
     """Map Pipecat language to a short code for the Simplismart API."""
@@ -33,12 +36,15 @@ class SimplismartSTTSettings(STTSettings):
         vad_onset: VAD onset threshold.
         beam_size: Beam search size for decoding.
         temperature: Decoding temperature.
+        strict_hallucination_reduction: Ask the server to apply extra
+            anti-hallucination logic (Whisper-specific).
     """
 
     vad_filter: bool = field(default=True)
     vad_onset: float = field(default=0.5)
     beam_size: int = field(default=4)
     temperature: float = field(default=0.0)
+    strict_hallucination_reduction: bool = field(default=True)
 
 
 class SimplismartSTTService(SegmentedSTTService):
@@ -78,6 +84,7 @@ class SimplismartSTTService(SegmentedSTTService):
             vad_onset=0.5,
             beam_size=4,
             temperature=0.0,
+            strict_hallucination_reduction=True,
         )
         if settings is not None:
             default_settings.apply_update(settings)
@@ -106,7 +113,8 @@ class SimplismartSTTService(SegmentedSTTService):
         lang = self._settings.language
         lang_str = _wire_language(lang) if lang is not None else "en"
 
-        return {
+        # Omit keys whose value is None — the API may reject explicit null fields.
+        raw = {
             "model": self._settings.model,
             "audio_data": audio_b64,
             "language": lang_str,
@@ -116,14 +124,11 @@ class SimplismartSTTService(SegmentedSTTService):
             "vad_filter": self._settings.vad_filter,
             "word_timestamps": False,
             "vad_onset": self._settings.vad_onset,
-            "vad_offset": None,
             "min_speech_duration_ms": 0,
             "max_speech_duration_s": 30,
             "min_silence_duration_ms": 2000,
             "speech_pad_ms": 400,
             "diarization": False,
-            "initial_prompt": None,
-            "hotwords": None,
             "num_speakers": 0,
             "compression_ratio_threshold": 2.4,
             "beam_size": self._settings.beam_size,
@@ -133,8 +138,9 @@ class SimplismartSTTService(SegmentedSTTService):
             "log_prob_threshold": -1.0,
             "length_penalty": 1,
             "repetition_penalty": 1.01,
-            "strict_hallucination_reduction": False,
+            "strict_hallucination_reduction": self._settings.strict_hallucination_reduction,
         }
+        return {k: v for k, v in raw.items() if v is not None}
 
     @traced_stt
     async def _handle_transcription(
@@ -144,6 +150,12 @@ class SimplismartSTTService(SegmentedSTTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe one WAV-encoded segment."""
+        # SegmentedSTTService encodes audio as WAV before calling run_stt.
+        # A WAV with no audio samples is just the 44-byte header — skip it
+        # to avoid sending empty payloads that cause server 500 errors.
+        if len(audio) <= _WAV_HEADER_BYTES:
+            return
+
         try:
             await self.start_processing_metrics()
 
@@ -165,14 +177,14 @@ class SimplismartSTTService(SegmentedSTTService):
             ) as resp:
                 if resp.status != 200:
                     err_text = await resp.text()
-                    msg = f"Simplismart STT HTTP {resp.status}: {err_text}"
-                    await self.push_error(msg)
-                    yield ErrorFrame(error=msg)
+                    # Yield ErrorFrame only — process_generator forwards it
+                    # upstream via push_error_frame, so calling push_error()
+                    # here too would produce duplicate ErrorFrames in the log.
+                    yield ErrorFrame(error=f"Simplismart STT HTTP {resp.status}: {err_text}")
                     return
                 data = await resp.json()
 
         except Exception as e:
-            await self.push_error(f"Simplismart STT error: {e}", exception=e)
             yield ErrorFrame(error=f"Simplismart STT error: {e}")
             return
 

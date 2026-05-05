@@ -2,13 +2,14 @@
 #
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# Voice agent using Simplismart STT / LLM / TTS — same layout as Pipecat
-# ``examples/getting-started/06-voice-agent.py``:
+# Voice agent powered entirely by Simplismart — STT, LLM, and TTS.
+#
+# Follows the same structure as Pipecat's getting-started voice agent:
 # https://github.com/pipecat-ai/pipecat/blob/main/examples/getting-started/06-voice-agent.py
 #
-# Run with the Pipecat development runner (playground UI for WebRTC):
+# Usage:
 #   python simplismart_bot.py -t webrtc
-# Then open http://localhost:7860/client
+#   Then open http://localhost:7860/client
 
 import os
 
@@ -16,7 +17,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -30,17 +31,16 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
-from pipecat_simplismart import (
-    SimplismartHttpTTSService,
-    SimplismartLLMService,
-    SimplismartSTTService,
-)
+from pipecat_simplismart import SimplismartHttpTTSService, SimplismartLLMService, SimplismartSTTService
 
 load_dotenv(override=True)
 
-# WebRTC (Pipecat runner playground at /client). To use Daily or Twilio, install
-# ``pipecat-ai[daily]`` / telephony extras and extend this dict — see
-# ``examples/getting-started/06-voice-agent.py``.
+SYSTEM_PROMPT = (
+    "You are a helpful, friendly voice assistant. "
+    "Keep your answers short and conversational — two or three sentences at most. "
+    "Avoid markdown, bullet points, and any formatting that doesn't read naturally aloud."
+)
+
 transport_params = {
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -51,76 +51,60 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting Simplismart voice bot")
-
     api_key = os.environ.get("SIMPLISMART_API_KEY")
     if not api_key:
-        raise RuntimeError("Set SIMPLISMART_API_KEY in the environment or .env file.")
+        raise RuntimeError("SIMPLISMART_API_KEY is not set. Copy env.example to .env and fill it in.")
 
-    stt = SimplismartSTTService(
+    stt = SimplismartSTTService(api_key=api_key)
+
+    llm = SimplismartLLMService(
         api_key=api_key,
-        base_url=os.environ.get("SIMPLISMART_STT_URL", "https://api.simplismart.live/predict"),
+        settings=SimplismartLLMService.Settings(system_instruction=SYSTEM_PROMPT),
     )
 
     tts = SimplismartHttpTTSService(
         api_key=api_key,
-        base_url=os.environ.get("SIMPLISMART_TTS_URL", "https://api.simplismart.live/tts"),
         sample_rate=SimplismartHttpTTSService.SAMPLE_RATE,
     )
 
-    llm = SimplismartLLMService(
-        api_key=api_key,
-        base_url=os.environ.get("SIMPLISMART_LLM_URL", "https://api.simplismart.live"),
-        settings=SimplismartLLMService.Settings(
-            system_instruction=(
-                "You are a helpful assistant in a voice conversation. Your responses "
-                "will be spoken aloud, so avoid emojis, bullet points, or other formatting "
-                "that can't be spoken. Respond in a brief, natural way."
-            ),
-        ),
-    )
-
-    vad = SileroVADAnalyzer()
-    vad_processor = VADProcessor(vad_analyzer=vad)
+    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    aggregators = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=vad),
+        user_params=LLMUserAggregatorParams(user_turn_stop_timeout=1.0),
     )
 
     pipeline = Pipeline(
         [
             transport.input(),
-            vad_processor,
+            vad,
             stt,
-            user_aggregator,
+            aggregators.user(),
             llm,
             tts,
             transport.output(),
-            assistant_aggregator,
+            aggregators.assistant(),
         ]
     )
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
-        context.add_message(
-            {
-                "role": "developer",
-                "content": "Please introduce yourself briefly to the user.",
-            }
+        await task.queue_frames(
+            [
+                LLMMessagesAppendFrame(
+                    messages=[{"role": "user", "content": "Hello"}],
+                    run_llm=True,
+                )
+            ]
         )
-        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
@@ -132,7 +116,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
 
 async def bot(runner_args: RunnerArguments):
-    """Entry point for ``python simplismart_bot.py -t webrtc`` (and other transports)."""
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 
