@@ -4,11 +4,8 @@
 #
 # Voice agent powered entirely by Simplismart — STT, LLM, and TTS.
 #
-# Follows the same structure as Pipecat's getting-started voice agent:
-# https://github.com/pipecat-ai/pipecat/blob/main/examples/getting-started/06-voice-agent.py
-#
 # Usage:
-#   python simplismart_bot.py -t webrtc
+#   python agent.py -t webrtc
 #   Then open http://localhost:7860/client
 
 import os

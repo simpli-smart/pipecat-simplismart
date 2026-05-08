@@ -1,28 +1,42 @@
-# pipecat-simplismart
+# Simplismart.ai Plugin for Pipecat
 
-Community-maintained [Pipecat](https://github.com/pipecat-ai/pipecat) integration for [Simplismart](https://simplismart.ai) — HTTP speech-to-text, streaming HTTP text-to-speech, and OpenAI-compatible chat completions.
+Official [Pipecat](https://github.com/pipecat-ai/pipecat) integration for [Simplismart.ai](https://simplismart.ai): speech-to-text, streaming text-to-speech, and OpenAI-compatible chat completions—built for real-time multimodal AI pipelines.
 
 **Maintained by Simplismart.**
 
-**Tested with Pipecat v1.1.0** (``pipecat-ai>=0.0.86``).
+**Tested with Pipecat v1.1.0** (`pipecat-ai>=0.0.86`).
 
 ## Install
 
-After the package is published to PyPI:
+Install from PyPI:
 
 ```bash
 pip install pipecat-simplismart
-# or
+```
+
+Or with uv:
+
+```bash
 uv add pipecat-simplismart
 ```
 
-From a Git checkout until then:
+The WebRTC quickstart below needs the **`example`** extra (Pipecat runner, Silero VAD, and WebRTC stack):
 
 ```bash
+pip install "pipecat-simplismart[example]"
+# or
+uv add "pipecat-simplismart[example]"
+```
+
+**From source**:
+
+```bash
+git clone https://github.com/simplismart/pipecat-simplismart.git
+cd pipecat-simplismart
 uv pip install -e ".[example]"
 ```
 
-## Usage (Pipecat pipeline)
+## Usage
 
 Each service follows Pipecat’s usual patterns (settings dataclass, frames, metrics).
 
@@ -55,7 +69,7 @@ stt = SimplismartSTTService(
 # pipeline: ... transport.input(), vad_processor, stt, ...
 ```
 
-### TTS (HTTP streaming)
+### TTS
 
 ```python
 from pipecat_simplismart import SimplismartHttpTTSService
@@ -71,33 +85,27 @@ tts = SimplismartHttpTTSService(
 )
 ```
 
-## Foundational example (Pipecat runner + playground)
+## Quickstart example
 
-This mirrors the [06-voice-agent](https://github.com/pipecat-ai/pipecat/blob/main/examples/getting-started/06-voice-agent.py) layout: ``create_transport``, ``run_bot``, and ``main()`` from the Pipecat development runner.
+The example lives in this repository’s `examples/foundational/` directory (not in the PyPI wheel). Clone the repo, then run a small WebRTC bot: Silero VAD, this package’s STT/LLM/TTS, and the Pipecat runner CLI.
 
-1. Copy ``examples/foundational/env.example`` to ``examples/foundational/.env`` and set ``SIMPLISMART_API_KEY``.
-2. From the ``pipecat-simplismart`` package directory:
+1. Copy `examples/foundational/env.example` to `examples/foundational/.env` and set `SIMPLISMART_API_KEY`.
+2. With the **`example`** extra installed (see **Install**), from the clone root:
 
 ```bash
-uv pip install -e ".[example]"
 cd examples/foundational
-python simplismart_bot.py -t webrtc
+python agent.py -t webrtc
+```
+
+If you use **uv** in a git checkout, from the repository root:
+
+```bash
+uv sync --extra example
+cd examples/foundational
+uv run --extra example python agent.py -t webrtc
 ```
 
 3. Open the **Pipecat playground** at [http://localhost:7860/client](http://localhost:7860/client), connect, and speak.
-
-If you use **uv** from the repo (e.g. ``uv run simplismart_bot.py``), install the example extras once so the runner and WebRTC UI are available, then pass the extra when running:
-
-```bash
-cd pipecat-simplismart
-uv sync --extra example
-cd examples/foundational
-uv run --extra example python simplismart_bot.py -t webrtc
-```
-
-The ``[example]`` extra installs ``pipecat-ai[runner,webrtc,silero]`` (runner FastAPI server, Silero VAD, WebRTC, and the prebuilt Small WebRTC client UI).
-
-> **Demo video:** add a short screen recording link here for your [Pipecat docs community integrations PR](https://github.com/pipecat-ai/docs).
 
 ## Environment variables
 
@@ -107,10 +115,6 @@ The ``[example]`` extra installs ``pipecat-ai[runner,webrtc,silero]`` (runner Fa
 | ``SIMPLISMART_STT_URL`` | Full URL for STT (default ``https://api.simplismart.live/predict``) |
 | ``SIMPLISMART_TTS_URL`` | TTS endpoint (default ``https://api.simplismart.live/tts``) |
 | ``SIMPLISMART_LLM_URL`` | OpenAI-compatible base URL (default ``https://api.simplismart.live``) |
-
-## Listing in Pipecat docs
-
-To appear on the [community integrations](https://docs.pipecat.ai/server/services/community-integrations) page, open a PR against [pipecat-ai/docs](https://github.com/pipecat-ai/docs) and post in **#community-integrations** on the Pipecat Discord.
 
 ## License
 
