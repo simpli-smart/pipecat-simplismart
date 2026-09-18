@@ -8,9 +8,14 @@ import aiohttp
 from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame, StartFrame, TTSAudioRawFrame
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+try:
+    from pipecat.services.settings import NotGiven as _NotGiven  # pipecat >= 1.8
+except ImportError:  # older pipecat only exposed the private name
+    from pipecat.services.settings import _NotGiven
 
 
 @dataclass
